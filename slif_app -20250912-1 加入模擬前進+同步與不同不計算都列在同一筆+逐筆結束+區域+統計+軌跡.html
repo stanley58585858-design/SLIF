@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>速限比對系統 V2（逐筆結束制｜區域＋GPS起終點＋完整軌跡＋統計＋地圖｜可點選高亮對應）</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<style>
+  :root{
+    --bg:#0b1220; --card:#0f172a; --muted:#1f2937; --text:#e5e7eb;
+    --sub:#94a3b8; --accent:#60a5fa; --ok:#22c55e; --bad:#ef4444;
+    --chip:#111827; --chip-border:#374151; --yellow:#f59e0b;
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px}
+  h1{font-size:22px;text-align:center;margin:8px 0 12px}
+  .row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+  .badge{background:var(--chip);border:1px solid var(--chip-border);padding:6px 12px;border-radius:999px;color:#e2e8f0}
+  .gps-badge{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;margin:8px 0}
+  .status{border:2px solid var(--muted);border-radius:12px;padding:10px 16px;text-align:center;margin:8px auto;max-width:480px;font-weight:700}
+  .section-title{color:#cbd5e1;margin:12px 0 6px 2px;font-weight:700}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:6px}
+  button{background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:12px;padding:10px 14px;font-weight:700;letter-spacing:.3px;cursor:pointer}
+  button.active{background:#1e293b;border-color:var(--accent);color:#93c5fd}
+  button.region{border-color:#444}
+  button.region.active{background:#1f2937;border-color:var(--yellow);color:#fde68a}
+  button:active{transform:scale(0.98);opacity:.95}
+  .card{background:var(--card);border:1px solid var(--muted);border-radius:12px;padding:12px;margin-top:10px}
+  .actions{display:flex;gap:10px;justify-content:center;margin:10px 0;flex-wrap:wrap}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .list{display:grid;gap:10px;margin-top:8px}
+  .item{background:#0f172a;border:1px solid #1f2937;border-radius:12px;padding:10px;scroll-margin:100px}
+  .time{color:#94a3b8;font-size:12px;margin-bottom:6px}
+  .empty{color:#64748b;text-align:center;margin:12px 0}
+  .hr{height:1px;background:#1f2937;margin:12px 0}
+  .sim-panel{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center}
+  .sim-panel input{background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px;width:140px}
+  .note{font-size:12px;color:#93c5fd;text-align:center;margin-top:6px}
+  .line{display:flex;align-items:center;gap:12px;white-space:nowrap;overflow-x:auto}
+  .chip{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:700;border:1px solid #1f2937}
+  .chip-ok{background:#0c2a18;border-color:#14532d;color:#86efac}
+  .chip-bad{background:#2a0c0c;border-color:#7f1d1d;color:#fca5a5}
+  .pair{font-weight:700}
+  .eq{color:var(--ok)}
+  .neq{color:var(--bad)}
+  .sep{opacity:.5}
+  .gps{font-size:12px;color:#a3a3a3;margin-top:4px}
+  #map{width:100%;height:420px;border-radius:12px;border:1px solid #1f2937}
+  .summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px}
+  .sum-item{background:#0f172a;border:1px solid #1f2937;padding:10px;border-radius:10px}
+  .sum-item h4{margin:0 0 6px 0;font-size:13px;color:#cbd5e1}
+  .sum-item .v{font-weight:700}
+  /* 高亮效果 for 列表 */
+  .flash{outline:2px solid #60a5fa; box-shadow:0 0 0 4px rgba(96,165,250,.25); transition: box-shadow .2s, outline .2s;}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>速限比對系統 V2（軌跡＋區域＋統計＋地圖｜點線段高亮＋自動對應到列表）</h1>
+
+    <div class="row">
+      <div class="badge" id="slifBadge">SLIF：-</div>
+      <div class="badge" id="appBadge">Applicable：-</div>
+      <div class="badge" id="speedBadge">速度：0 km/h</div>
+      <div class="badge" id="regionBadge">區域：未選</div>
+    </div>
+
+    <div class="gps-badge">
+      <div class="badge" id="gpsStatus">GPS：等待授權…</div>
+      <div class="badge" id="gpsPos">—</div>
+      <div class="badge" id="gpsAcc">—</div>
+      <div class="badge" id="gpsTime">—</div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">區域（Region）</div>
+      <div class="btnrow" id="regionRow">
+        <button class="region" data-region="高速">高速</button>
+        <button class="region" data-region="鄉村">鄉村</button>
+        <button class="region" data-region="市區">市區</button>
+      </div>
+      <div class="note">提示：切換區域只影響「新開啟的下一段」。每段紀錄會保存起始時的區域與完整軌跡。</div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="section-title">模擬前進（連續移動）</div>
+        <div class="sim-panel">
+          <button id="simToggleBtn">模擬前進：OFF</button>
+          <label>起點緯度 <input id="simLat" type="number" step="0.000001" placeholder="25.0330"></label>
+          <label>起點經度 <input id="simLon" type="number" step="0.000001" placeholder="121.5654"></label>
+        </div>
+        <div class="note">模擬 ON 後：按 <b>SLIF</b> 速限開始持續移動；按 <b>SLIF 0</b> 或關閉模擬即停止。</div>
+        <div class="status" id="statusBox">待比對</div>
+        <div class="section-title">SLIF</div>
+        <div class="btnrow" id="slifRow"></div>
+        <div class="section-title">Applicable</div>
+        <div class="btnrow" id="appRow"></div>
+        <div class="actions">
+          <button id="clearBtn">清空紀錄</button>
+          <button id="exportBtn">匯出 CSV</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">地圖（Leaflet）</div>
+        <div id="map"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">統計摘要（自動）</div>
+      <div id="summary" class="summary"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">紀錄（上一筆的 SLIF X =/≠ Applicable Y）</div>
+      <div id="list" class="list"></div>
+      <div id="empty" class="empty">尚無紀錄，請點上方按鍵進行比對</div>
+    </div>
+
+    <div class="hr"></div>
+    <div class="gps">時間使用 Asia/Taipei；資料保存在本機（localStorage）。</div>
+  </div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+(function(){
+  const SPEEDS = [0,30,50,70,80,90];
+  const REGIONS = ["高速","鄉村","市區"];
+  const storageKey = "slif_app_records_event_segments_v7_regions_map_tracks_highlight";
+  const tz = "Asia/Taipei";
+  const TICK_MS = 1000;
+
+  let slif = null, applicable = null, records = load();
+  let latestFix = null;
+  let simOn=false, simLat=null, simLon=null, currentSpeedKmh=0, moveTimer=null;
+  let activeSeg = null; // {id,status,startTime,startPos,slif,applicable,region,path:[[lat,lon,ts], ...]}
+  let activeRegion = null;
+
+  // Highligh state
+  const polyIndex = new Map(); // id -> polyline
+  let highlighted = { poly:null, el:null, style:null };
+
+  // DOM
+  const slifRow = document.getElementById("slifRow");
+  const appRow = document.getElementById("appRow");
+  const statusBox = document.getElementById("statusBox");
+  const slifBadge = document.getElementById("slifBadge");
+  const appBadge = document.getElementById("appBadge");
+  const speedBadge = document.getElementById("speedBadge");
+  const regionBadge = document.getElementById("regionBadge");
+  const list = document.getElementById("list");
+  const empty = document.getElementById("empty");
+  const clearBtn = document.getElementById("clearBtn");
+  const exportBtn = document.getElementById("exportBtn");
+  const gpsStatus = document.getElementById("gpsStatus");
+  const gpsPos = document.getElementById("gpsPos");
+  const gpsAcc = document.getElementById("gpsAcc");
+  const gpsTime = document.getElementById("gpsTime");
+  const simToggleBtn = document.getElementById("simToggleBtn");
+  const simLatInput = document.getElementById("simLat");
+  const simLonInput = document.getElementById("simLon");
+  const regionRow = document.getElementById("regionRow");
+  const summaryBox = document.getElementById("summary");
+
+  // Map
+  let map = L.map('map', { zoomControl: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+  map.setView([25.0330, 121.5654], 13);
+  let layerGroup = L.layerGroup().addTo(map);
+
+  // Build buttons
+  SPEEDS.forEach(v=>{ const b=document.createElement("button"); b.textContent=v; b.onclick=()=>press("SLIF",v); slifRow.appendChild(b); });
+  [30,50,70,80,90].forEach(v=>{ const b=document.createElement("button"); b.textContent=v; b.onclick=()=>press("APP",v); appRow.appendChild(b); });
+  [...regionRow.querySelectorAll("button.region")].forEach(btn=>{
+    btn.onclick=()=>{
+      activeRegion = btn.dataset.region;
+      regionBadge.textContent = "區域：" + activeRegion;
+      [...regionRow.children].forEach(b=>b.classList.remove("active"));
+      btn.classList.add("active");
+    };
+  });
+
+  initGPS();
+  render();
+
+  // Sim toggle
+  simToggleBtn.onclick=()=>{
+    simOn=!simOn;
+    simToggleBtn.textContent="模擬前進："+(simOn?"ON":"OFF");
+    if(simOn){
+      gpsStatus.textContent="GPS：模擬中 ✅";
+      const initLat=parseFloat(simLatInput.value), initLon=parseFloat(simLonInput.value);
+      if(isFinite(initLat)&&isFinite(initLon)){ simLat=initLat; simLon=initLon; }
+      else if(latestFix){ simLat=latestFix.lat; simLon=latestFix.lon; }
+      else { simLat=25.0330; simLon=121.5654; }
+      simLatInput.value=simLat.toFixed(6); simLonInput.value=simLon.toFixed(6);
+      startMoving(); updateGpsBadges(simLat,simLon,0,"(模擬)");
+    }else{
+      stopMoving(); currentSpeedKmh=0; speedBadge.textContent="速度：0 km/h";
+      if(latestFix){ gpsStatus.textContent="GPS：已就緒 ✅"; updateGpsBadges(latestFix.lat,latestFix.lon,latestFix.accuracy); }
+      else { gpsStatus.textContent="GPS：等待授權…"; gpsPos.textContent="—"; gpsAcc.textContent="—"; gpsTime.textContent="—"; }
+    }
+  };
+
+  function press(group, value){
+    if(group==="SLIF"){
+      slif = value; markActive(slifRow, value); slifBadge.textContent = "SLIF：" + value;
+      if(simOn){ currentSpeedKmh = Number(value) || 0; speedBadge.textContent = `速度：${currentSpeedKmh} km/h`; startMoving(); }
+    }else{
+      applicable = value; markActive(appRow, value); appBadge.textContent = "Applicable：" + value;
+    }
+    onEvent();
+  }
+
+  // Core
+  async function onEvent(){
+    const nowTs = Date.now();
+    let nowLat=null, nowLon=null, nowAcc=null;
+    if(latestFix){ nowLat=latestFix.lat; nowLon=latestFix.lon; nowAcc=latestFix.accuracy; }
+
+    // close previous
+    if(activeSeg){
+      const durationSec = Math.max(0, Math.round((nowTs - activeSeg.startTime)/1000));
+      let dist = 0;
+      const path = activeSeg.path || [];
+      if(path.length >= 2){
+        for(let i=1;i<path.length;i++){ dist += haversine(path[i-1][0], path[i-1][1], path[i][0], path[i][1]); }
+      }else if(activeSeg.startPos && isFinite(nowLat)&&isFinite(nowLon)){
+        dist = haversine(activeSeg.startPos.lat, activeSeg.startPos.lon, nowLat, nowLon);
+      }else{ dist = null; }
+      const endLat = (path.length? path[path.length-1][0] : (isFinite(nowLat)? nowLat: null));
+      const endLon = (path.length? path[path.length-1][1] : (isFinite(nowLon)? nowLon: null));
+      const rec = {
+        id: activeSeg.id,
+        timestamp: nowTW(), segment_status: activeSeg.status, region: activeSeg.region || "",
+        segment_seconds: durationSec, segment_distance_m: dist,
+        prev_SLIF: activeSeg.slif, prev_Applicable: activeSeg.applicable,
+        start_lat: activeSeg.startPos? activeSeg.startPos.lat : null, start_lon: activeSeg.startPos? activeSeg.startPos.lon : null,
+        end_lat: endLat, end_lon: endLon, path
+      };
+      records=[rec,...records]; save(records); render();
+    }
+
+    // open new
+    const statusNow = (slif===applicable) ? "同步" : "不同步";
+    let startPos=null;
+    if(isFinite(nowLat)&&isFinite(nowLon)){ startPos={lat:nowLat, lon:nowLon}; }
+    activeSeg = {
+      id: "r" + nowTs,
+      status: statusNow,
+      startTime: nowTs,
+      startPos,
+      slif, applicable, region: activeRegion,
+      path: startPos? [[startPos.lat, startPos.lon, nowTs]] : []
+    };
+
+    statusBox.textContent = (statusNow==="同步") ? "同步 ✅" : "不同步 ❌";
+    statusBox.style.borderColor = (statusNow==="同步") ? "var(--ok)" : "var(--bad)";
+    statusBox.style.color = (statusNow==="同步") ? "var(--ok)" : "var(--bad)";
+  }
+
+  // track push
+  function pushTrack(lat, lon){
+    if(activeSeg && isFinite(lat) && isFinite(lon)){
+      if(!activeSeg.path) activeSeg.path = [];
+      const last = activeSeg.path[activeSeg.path.length-1];
+      if(!last || last[0]!==lat || last[1]!==lon){
+        activeSeg.path.push([lat, lon, Date.now()]);
+      }
+    }
+  }
+
+  // Renderers
+  function render(){
+    renderList();
+    renderSummary();
+    renderMap();
+  }
+
+  function renderList(){
+    list.innerHTML=""; if(!records.length){ empty.style.display="block"; } else { empty.style.display="none"; }
+    records.forEach((r, idx)=>{
+      const id = r.id || ("legacy"+idx);
+      const it=document.createElement("div"); it.className="item"; it.dataset.recId=id;
+      it.onclick=()=>highlight(id); // 反向互動：點列表 → 地圖高亮
+      const t=document.createElement("div"); t.className="time"; t.textContent=r.timestamp + (r.region? `｜區域：${r.region}`:"");
+      const segTime=(r.segment_seconds!=null)? formatDuration(r.segment_seconds) : "—";
+      const segDist=(r.segment_distance_m!=null)? Math.round(r.segment_distance_m)+" m" : "—";
+      const isSync=(r.segment_status==="同步"), op=isSync?" = ":" ≠ ";
+      const line=document.createElement("div"); line.className="line";
+      const chip=document.createElement("span"); chip.className="chip "+(isSync?"chip-ok":"chip-bad"); chip.textContent=r.segment_status;
+      const text=document.createElement("span"); text.textContent=(isSync?"同步":"不同步")+"時間/距離："+segTime+"、"+segDist;
+      const sep=document.createElement("span"); sep.className="sep"; sep.textContent=" | ";
+      const pair=document.createElement("span"); pair.className="pair "+(isSync?"eq":"neq"); pair.textContent="SLIF "+r.prev_SLIF+op+"Applicable "+r.prev_Applicable;
+      it.appendChild(t);
+      line.appendChild(chip); line.appendChild(document.createTextNode(" ")); line.appendChild(text); line.appendChild(sep); line.appendChild(pair);
+      it.appendChild(line);
+      if(isFinite(r.start_lat) && isFinite(r.start_lon) && isFinite(r.end_lat) && isFinite(r.end_lon)){
+        const g=document.createElement("div"); g.className="gps";
+        g.textContent=`Start: ${Number(r.start_lat).toFixed(6)}, ${Number(r.start_lon).toFixed(6)} → End: ${Number(r.end_lat).toFixed(6)}, ${Number(r.end_lon).toFixed(6)}（點數：${Array.isArray(r.path)? r.path.length: 0}）`;
+        it.appendChild(g);
+      }
+      list.appendChild(it);
+    });
+  }
+
+  function renderSummary(){
+    const stats = { overall: { syncTime:0, syncDist:0, desyncTime:0, desyncDist:0 }, region: {} };
+    REGIONS.forEach(r=>{ stats.region[r]={ syncTime:0, syncDist:0, desyncTime:0, desyncDist:0 }; });
+    records.forEach(r=>{
+      const t=r.segment_seconds||0;
+      const d=(r.segment_distance_m!=null? r.segment_distance_m:0);
+      const bucket = (r.segment_status==="同步") ? ["syncTime","syncDist"] : ["desyncTime","desyncDist"];
+      stats.overall[bucket[0]] += t; stats.overall[bucket[1]] += d;
+      const rg = r.region && stats.region[r.region] ? r.region : null;
+      if(rg){ stats.region[rg][bucket[0]] += t; stats.region[rg][bucket[1]] += d; }
+    });
+    function box(title, t, d){ return `<div class="sum-item"><h4>${title}</h4><div class="v">時間：${formatDuration(Math.round(t))}</div><div class="v">距離：${Math.round(d)} m</div></div>`; }
+    summaryBox.innerHTML =
+      box("整體：同步", stats.overall.syncTime, stats.overall.syncDist) +
+      box("整體：不同步", stats.overall.desyncTime, stats.overall.desyncDist) +
+      box("高速：同步", stats.region["高速"].syncTime, stats.region["高速"].syncDist) +
+      box("高速：不同步", stats.region["高速"].desyncTime, stats.region["高速"].desyncDist) +
+      box("鄉村：同步", stats.region["鄉村"].syncTime, stats.region["鄉村"].syncDist) +
+      box("鄉村：不同步", stats.region["鄉村"].desyncTime, stats.region["鄉村"].desyncDist) +
+      box("市區：同步", stats.region["市區"].syncTime, stats.region["市區"].syncDist) +
+      box("市區：不同步", stats.region["市區"].desyncTime, stats.region["市區"].desyncDist);
+  }
+
+  function renderMap(){
+    polyIndex.clear();
+    layerGroup.clearLayers();
+    let bounds = [];
+    records.forEach((r, idx)=>{
+      const id = r.id || ("legacy"+idx);
+      let coords = [];
+      if(Array.isArray(r.path) && r.path.length >= 2){ coords = r.path.map(p=>[p[0],p[1]]); }
+      else if(isFinite(r.start_lat)&&isFinite(r.start_lon)&&isFinite(r.end_lat)&&isFinite(r.end_lon)){
+        coords = [[r.start_lat,r.start_lon],[r.end_lat,r.end_lon]];
+      }
+      if(coords.length >= 2){
+        const color = (r.segment_status==="同步") ? "#22c55e" : "#ef4444";
+        const line = L.polyline(coords, {color:color, weight:5, opacity:0.85});
+        line.addTo(layerGroup);
+        bounds.push(...coords);
+        const label = `${r.segment_status}｜${r.region||"未選"}｜${formatDuration(r.segment_seconds||0)}｜${Math.round(r.segment_distance_m||0)} m\nSLIF ${r.prev_SLIF} ${(r.segment_status==="同步")?"=":"≠"} Applicable ${r.prev_Applicable}`;
+        line.bindTooltip(label);
+        line.on('click', ()=>highlight(id)); // 地圖點擊 → 高亮 & 捲到列表
+        polyIndex.set(id, line);
+      }
+    });
+    if(bounds.length){ map.fitBounds(bounds, {padding:[20,20]}); }
+  }
+
+  // 高亮邏輯
+  function highlight(id){
+    // 清掉上一次
+    if(highlighted.poly){
+      highlighted.poly.setStyle(highlighted.style);
+      highlighted.poly = null; highlighted.style = null;
+    }
+    if(highlighted.el){
+      highlighted.el.classList.remove('flash');
+      highlighted.el = null;
+    }
+    // 找 poly
+    const poly = polyIndex.get(id);
+    if(poly){
+      const prev = { color: poly.options.color, weight: poly.options.weight, opacity: poly.options.opacity };
+      highlighted.poly = poly; highlighted.style = prev;
+      poly.setStyle({ weight: 9, opacity: 1.0 });
+      poly.bringToFront();
+      try{ map.fitBounds(poly.getBounds(), {maxZoom:18, padding:[40,40]}); }catch(e){}
+    }
+    // 找列表元素
+    const el = list.querySelector(`[data-rec-id="${id}"]`);
+    if(el){
+      highlighted.el = el;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(()=> el.classList.add('flash'), 200);
+      setTimeout(()=> el.classList.remove('flash'), 1400);
+    }
+  }
+
+  // GPS
+  function initGPS(){
+    if(!("geolocation" in navigator)){ gpsStatus.textContent="GPS：裝置不支援"; return; }
+    gpsStatus.textContent="GPS：等待授權…";
+    navigator.geolocation.watchPosition(
+      (pos)=>{ if(simOn) return; const {latitude,longitude,accuracy}=pos.coords;
+        latestFix={lat:latitude,lon:longitude,accuracy,ts:Date.now()};
+        gpsStatus.textContent="GPS：已就緒 ✅"; updateGpsBadges(latitude,longitude,accuracy);
+        pushTrack(latitude, longitude);
+      },
+      (err)=>{ if(simOn) return;
+        gpsStatus.textContent=`GPS：${err.code===1?"未授權":(err.code===2?"不可用":"逾時")} ❌`;
+        gpsPos.textContent="—"; gpsAcc.textContent="—"; gpsTime.textContent="—";
+      },
+      {enableHighAccuracy:true, timeout:10000, maximumAge:5000}
+    );
+  }
+  function startMoving(){
+    if(moveTimer) clearInterval(moveTimer);
+    moveTimer=setInterval(()=>{
+      if(!simOn || currentSpeedKmh<=0) return;
+      const mps=currentSpeedKmh/3.6;
+      const dLat=mps/111320; // move north
+      simLat = parseFloat(simLatInput.value) || simLat || 25.0330;
+      simLon = parseFloat(simLonInput.value) || simLon || 121.5654;
+      simLat += dLat;
+      simLatInput.value = simLat.toFixed(6); simLonInput.value = simLon.toFixed(6);
+      latestFix = { lat: simLat, lon: simLon, accuracy: 0, ts: Date.now() };
+      updateGpsBadges(simLat, simLon, 0, "(模擬)");
+      pushTrack(simLat, simLon);
+    }, TICK_MS);
+  }
+  function stopMoving(){ if(moveTimer){ clearInterval(moveTimer); moveTimer=null; } }
+
+  // helpers
+  function formatDuration(s){ const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60; const parts=[]; if(h) parts.push(h+"h"); if(m||h) parts.push(m+"m"); parts.push(sec+"s"); return parts.join(" "); }
+  function markActive(row,value){ [...row.children].forEach(ch=>ch.classList.remove("active")); const t=[...row.children].find(ch=>Number(ch.textContent)===value); if(t) t.classList.add("active"); }
+  function haversine(lat1,lon1,lat2,lon2){ const toRad=d=>d*Math.PI/180, R=6371000; const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1); const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(a)); }
+  function updateGpsBadges(lat,lon,acc,extra){ gpsPos.textContent=`座標：${Number(lat).toFixed(6)}, ${Number(lon).toFixed(6)}`; gpsAcc.textContent=`精度：約 ${Math.round(acc||0)} m`; gpsTime.textContent=`更新：${nowTW()}${extra? " "+extra:""}`; }
+  function nowTW(){ return new Date().toLocaleString("zh-TW",{timeZone:tz,hour12:false}); }
+  function save(arr){ try{ localStorage.setItem(storageKey, JSON.stringify(arr)); }catch(e){} }
+  function load(){ try{ const raw=localStorage.getItem(storageKey); return raw?JSON.parse(raw):[]; }catch(e){ return []; } }
+
+  // 清空 & 匯出
+  clearBtn.onclick=()=>{ if(confirm("確定要清空所有紀錄嗎？")){ records=[]; save(records); render(); activeSeg=null; layerGroup.clearLayers(); } };
+  exportBtn.onclick=()=>{
+    if(!records.length){ alert("目前沒有資料可匯出。"); return; }
+    const header=["timestamp","segment_status","region","segment_seconds","segment_distance_m","prev_SLIF","prev_Applicable","start_lat","start_lon","end_lat","end_lon"];
+    const lines=[header.join(",")];
+    records.forEach((r)=>{
+      lines.push([
+        quote(r.timestamp), quote(r.segment_status), quote(r.region||""),
+        (r.segment_seconds!=null? r.segment_seconds : ""),
+        (r.segment_distance_m!=null? Math.round(r.segment_distance_m) : ""),
+        r.prev_SLIF, r.prev_Applicable,
+        (isFinite(r.start_lat)? r.start_lat : ""), (isFinite(r.start_lon)? r.start_lon : ""),
+        (isFinite(r.end_lat)? r.end_lat : ""), (isFinite(r.end_lon)? r.end_lon : "")
+      ].join(","));
+    });
+    const blob=new Blob(["\ufeff"+lines.join("\n")],{type:"text/csv;charset=utf-8;"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="slif_event_segments_regions_map_tracks.csv"; a.click(); URL.revokeObjectURL(a.href);
+  };
+  function quote(s){ if(s==null) return ""; const t=String(s); return /[\",\n]/.test(t)?`"${t.replace(/"/g,'""')}"`:t; }
+
+})();
+</script>
+</body>
+</html>
