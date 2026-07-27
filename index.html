@@ -126,7 +126,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
 (function(){
-  const SPEEDS = [0,30,50,70,80,90];
+  const SPEEDS = [0,10,20,30,50,60,70,80,90,100,110,120,130];
   const REGIONS = ["高速","鄉村","市區"];
   const storageKey = "slif_app_records_event_segments_v7_regions_map_tracks_highlight";
   const tz = "Asia/Taipei";
@@ -172,7 +172,7 @@
 
   // Build buttons
   SPEEDS.forEach(v=>{ const b=document.createElement("button"); b.textContent=v; b.onclick=()=>press("SLIF",v); slifRow.appendChild(b); });
-  [30,50,70,80,90].forEach(v=>{ const b=document.createElement("button"); b.textContent=v; b.onclick=()=>press("APP",v); appRow.appendChild(b); });
+  SPEEDS.forEach(v=>{ const b=document.createElement("button"); b.textContent=v; b.onclick=()=>press("APP",v); appRow.appendChild(b); });
   [...regionRow.querySelectorAll("button.region")].forEach(btn=>{
     btn.onclick=()=>{
       activeRegion = btn.dataset.region;
