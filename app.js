@@ -1,5 +1,5 @@
 (function(){
-  const SPEEDS = [0,10,20,30,50,60,70,80,90,100,110,120,130];
+  const SPEEDS = [0,10,20,30,40,50,60,70,80,90,100,110,120,130];
   const REGIONS = ["高速","鄉村","市區"];
   const storageKey = "slif_app_records_event_segments_v7_regions_map_tracks_highlight";
   const tz = "Asia/Taipei";
